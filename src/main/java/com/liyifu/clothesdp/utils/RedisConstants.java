@@ -19,4 +19,8 @@ public class RedisConstants {
     //reids存放商铺类型
     public static final Long CACHE_SHOP_TYPE_TTL = 30L;
     public static final String CACHE_SHOP_TYPE_KEY = "cache:shopType";
+
+    //redis存放商铺数据
+    public static final Long CACHE_SHOP_TTL = 30L;
+    public static final String CACHE_SHOP_KEY = "cache:shop:";
 }
