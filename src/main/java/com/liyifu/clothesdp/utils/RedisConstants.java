@@ -23,4 +23,8 @@ public class RedisConstants {
     //redis存放商铺数据
     public static final Long CACHE_SHOP_TTL = 30L;
     public static final String CACHE_SHOP_KEY = "cache:shop:";
+
+    //根据id查询商铺时，为了解决缓存击穿问题，需要用到锁
+    public static final String LOCK_SHOP_KEY = "lock:shop:";
+    public static final Long LOCK_SHOP_TTL = 10L;
 }
