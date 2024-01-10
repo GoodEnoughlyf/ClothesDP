@@ -27,4 +27,7 @@ public class RedisConstants {
     //根据id查询商铺时，为了解决缓存击穿问题，需要用到锁
     public static final String LOCK_SHOP_KEY = "lock:shop:";
     public static final Long LOCK_SHOP_TTL = 10L;
+
+    //redisn寸秒杀劵
+    public static final String SECKILL_STOCK_KEY = "seckill:stock:";
 }

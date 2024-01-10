@@ -10,4 +10,9 @@ import com.liyifu.clothesdp.model.entity.VoucherOrder;
 */
 public interface VoucherOrderService extends IService<VoucherOrder> {
 
+    /**
+     * 秒杀劵下单
+     * @param voucherId
+     */
+    Long secSkillVoucherOrder(Long voucherId);
 }

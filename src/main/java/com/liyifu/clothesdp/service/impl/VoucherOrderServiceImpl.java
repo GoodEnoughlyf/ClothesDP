@@ -1,20 +1,94 @@
 package com.liyifu.clothesdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.liyifu.clothesdp.exception.MyException;
+import com.liyifu.clothesdp.model.entity.SeckillVoucher;
 import com.liyifu.clothesdp.model.entity.VoucherOrder;
 import com.liyifu.clothesdp.mapper.VoucherOrderMapper;
+import com.liyifu.clothesdp.model.vo.UserVO;
+import com.liyifu.clothesdp.service.SeckillVoucherService;
 import com.liyifu.clothesdp.service.VoucherOrderService;
+import com.liyifu.clothesdp.utils.RedisConstants;
+import com.liyifu.clothesdp.utils.UserThreadLocal;
+import io.swagger.models.auth.In;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.annotation.Resource;
+import java.time.LocalDateTime;
+
+import static com.liyifu.clothesdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 
 /**
 * @author liyifu
 * @description 针对表【voucher_order】的数据库操作Service实现
 * @createDate 2024-01-07 10:47:02
 */
+@Transactional
 @Service
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder>
     implements VoucherOrderService {
+    @Resource
+    private SeckillVoucherService seckillVoucherService;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Override
+    public Long secSkillVoucherOrder(Long voucherId) {
+        //1、查询优惠劵信息
+        QueryWrapper<SeckillVoucher> seckillVoucherQueryWrapper=new QueryWrapper<>();
+        seckillVoucherQueryWrapper.eq("voucher_id",voucherId);
+        SeckillVoucher seckillVoucher = seckillVoucherService.getOne(seckillVoucherQueryWrapper);
+
+        //2、活动未开始，返回异常
+        if(seckillVoucher.getBeginTime().isAfter(LocalDateTime.now())){
+            throw new MyException(401,"活动未开始！");
+        }
+
+        //3、活动已结束，返回异常
+        if(seckillVoucher.getEndTime().isBefore(LocalDateTime.now())){
+            throw new MyException(401,"活动已结束!");
+        }
+
+        //4、判断库存是否充足
+        String jsonValue = stringRedisTemplate.opsForValue().get(SECKILL_STOCK_KEY + voucherId);
+        Integer stock = Integer.valueOf(jsonValue);
+        // 不存足，返回异常
+        if(stock<1){
+            throw new MyException(401,"库存不足！");
+        }
+
+        //5、库存充足，使用乐观锁的CAS法更新库存
+            //5、1 扣件库存
+        SeckillVoucher newSeckillVoucher = new SeckillVoucher();
+        BeanUtil.copyProperties(seckillVoucher,newSeckillVoucher);
+        Integer newStock=stock-1;
+        newSeckillVoucher.setStock(newStock);
+            //5、2 更新库存前，需要判断查询到的数据是否被修改
+        QueryWrapper<SeckillVoucher> queryWrapper=new QueryWrapper<>();
+        queryWrapper.gt("stock",0);
+        boolean success = seckillVoucherService.update(newSeckillVoucher,queryWrapper);
+            //5、3 如果不满足乐观锁的要求，则返回异常
+        if(!success){
+            throw new MyException(401,"库存不足！");
+        }
+            //5、4 更新缓存
+        stringRedisTemplate.opsForValue().set(SECKILL_STOCK_KEY+voucherId,newStock.toString());
+
+        //6、创建新线程创建订单
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setVoucherId(voucherId);
+        UserVO userVO = UserThreadLocal.getUser();
+        voucherOrder.setUserId(userVO.getId());
+        this.save(voucherOrder);
+
+        return voucherOrder.getId();
+    }
 }
 
 
