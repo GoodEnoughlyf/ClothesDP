@@ -1,6 +1,7 @@
 package com.liyifu.clothesdp.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.liyifu.clothesdp.model.entity.SeckillVoucher;
 import com.liyifu.clothesdp.model.entity.VoucherOrder;
 
 /**
@@ -15,4 +16,13 @@ public interface VoucherOrderService extends IService<VoucherOrder> {
      * @param voucherId
      */
     Long secSkillVoucherOrder(Long voucherId);
+
+    /**
+     * 创建订单
+     * @param voucherId
+     * @param seckillVoucher
+     * @param stock
+     * @return
+     */
+    Long createOrder(Long voucherId, SeckillVoucher seckillVoucher, Integer stock)
 }
