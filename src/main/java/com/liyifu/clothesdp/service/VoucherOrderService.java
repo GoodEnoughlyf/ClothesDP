@@ -24,5 +24,12 @@ public interface VoucherOrderService extends IService<VoucherOrder> {
      * @param stock
      * @return
      */
-    Long createOrder(Long voucherId, SeckillVoucher seckillVoucher, Integer stock)
+    Long createOrder(Long voucherId, SeckillVoucher seckillVoucher, Integer stock);
+
+    /**
+     * 利用rabbitMq异步购买秒杀劵
+     * @param voucherId
+     * @return
+     */
+    Long secSkillVoucherRabbitMQOrder(Long voucherId);
 }

@@ -9,6 +9,7 @@ import com.liyifu.clothesdp.model.entity.SeckillVoucher;
 import com.liyifu.clothesdp.model.entity.VoucherOrder;
 import com.liyifu.clothesdp.mapper.VoucherOrderMapper;
 import com.liyifu.clothesdp.model.vo.UserVO;
+import com.liyifu.clothesdp.rabbitmq.RabbitMQProducer;
 import com.liyifu.clothesdp.service.SeckillVoucherService;
 import com.liyifu.clothesdp.service.VoucherOrderService;
 import com.liyifu.clothesdp.utils.RedisConstants;
@@ -17,12 +18,15 @@ import io.swagger.models.auth.In;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.Collections;
 
 import static com.liyifu.clothesdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 
@@ -43,6 +47,18 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private RedissonClient redissonClient;
+
+    @Resource
+    private RabbitMQProducer rabbitMQProducer;
+
+    //防止每一次释放锁都需要利用io流读取lua脚本，于是将lua脚本放入静态代码块中初始化
+    private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
+
+    static {
+        SECKILL_SCRIPT = new DefaultRedisScript<>();
+        SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
+        SECKILL_SCRIPT.setResultType(Long.class);
+    }
 
     /**
      * 购买秒杀劵
@@ -83,18 +99,18 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         //获取锁
         boolean isLock = lock.tryLock();
         //获取锁失败
-        if(!isLock){
-            throw new MyException(401,"一人只能抢购一张秒杀劵！");
+        if (!isLock) {
+            throw new MyException(401, "一人只能抢购一张秒杀劵！");
         }
 
-        try{
+        try {
             Object o = AopContext.currentProxy();
             VoucherOrderService proxy = (VoucherOrderService) o;
             orderId = proxy.createOrder(voucherId, seckillVoucher, stock);
             return orderId;
-        }catch (Exception e){
+        } catch (Exception e) {
             throw new RuntimeException(e);
-        }finally {
+        } finally {
             //释放锁
             lock.unlock();
         }
@@ -140,6 +156,44 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         return voucherOrder.getId();
     }
+
+    /**
+     * 利用rabbitMq异步购买秒杀劵
+     *
+     * @param voucherId
+     * @return
+     */
+    @Override
+    public Long secSkillVoucherRabbitMQOrder(Long voucherId) {
+        //获取用户
+        Long userId = UserThreadLocal.getUser().getId();
+        //1.执行lua脚本
+        Long result = stringRedisTemplate.execute(
+                SECKILL_SCRIPT,
+                Collections.emptyList(), //这里是key数组，没有key，就传的一个空集合
+                voucherId.toString(), userId.toString()
+        );
+        //2.判断结果是0
+        int r = result.intValue();//Long型转为int型，便于下面比较
+        if (r != 0) {
+            //2.1 不为0，代表没有购买资格
+            throw new MyException(401,r==1?"优惠劵售卖完":"不能重复购买");
+        }
+        //2.2 为0，有购买资格，把下单信息保存到阻塞队列中
+        //7.创建订单   向订单表新增一条数据，除默认字段，其他字段的值需要set
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setId(voucherOrder.getId());
+        voucherOrder.setUserId(userId);
+        voucherOrder.setVoucherId(voucherId);
+        //放入消息队列中
+        rabbitMQProducer.send("myExchange","myRoutingKey",voucherOrder);
+
+        //3.返回订单id
+        return voucherOrder.getId();
+    }
+
+
+
 }
 
 
